@@ -1,0 +1,137 @@
+
+
+
+services:
+  plex:
+    container_name: plex
+    image: lscr.io/linuxserver/plex:latest
+    network_mode: host
+    environment:
+      - VERSION=docker
+      - PUID=1000 #user that has permissions
+      - PGID=1000
+      - TZ=<TIMEZONE> #take the timezone from wikipedia
+    volumes:
+      - /path/mediastack/config/plex:/config
+      - /path/mediastack/data/media/:/data/media
+    devices:
+      - /dev/dri/renderD128 #AMD iGPU driver (can find in default path /drv/dri)
+    shm_size: "2gb"
+    restart: unless-stopped
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=airvpn #vpn provider check gluetun repo for supported providers
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=PRIVATE_KEY
+      - WIREGUARD_PRESHARED_KEY=PRESHARED_KEY
+      - WIREGUARD_ADDRESSES=ADDRESS
+      - FIREWALL_VPN_INPUT_PORTS=PORT
+    ports:
+      - 8080:8080 #qbittorrent default port
+      - 8989:8989 #sonarr default port
+      - 7878:7878 #radarr default port
+      - 9696:9696 #prowlarr default port
+    restart: unless-stopped
+  qbittorrent:
+    container_name: qbittorrent
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=<TIMEZONE>
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=PORT #port forwarded from vpn
+      - VPN_PORT_FORWARDING_LISTENING_PORT=PORT #port forwarded from vpn
+      - LAN_NETWORK=<IP OF server> #internal ip of server
+    image: lscr.io/linuxserver/qbittorrent:latest
+    network_mode: service:gluetun
+    restart: unless-stopped
+    volumes:
+      - /path/mediastack/config/qbittorrent/:/config
+      - /path/mediastack/data/torrents:/data/torrents
+  sonarr:
+    container_name: sonarr
+    network_mode: service:gluetun
+    image: lscr.io/linuxserver/sonarr:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=<TIMEZONE> 
+    volumes:
+      - /path/mediastack/config/sonarr:/config
+      - /path/mediastack/data/:/data
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    restart: unless-stopped
+  radarr:
+    container_name: radarr
+    network_mode: service:gluetun
+    image: lscr.io/linuxserver/radarr:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=<TIMEZONE>
+    volumes:
+      - /path/mediastack/config/radarr:/config
+      - /path/mediastack/data/:/data
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    restart: unless-stopped
+  prowlarr:
+    container_name: prowlarr
+    network_mode: service:gluetun
+    image: lscr.io/linuxserver/prowlarr:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=<TIMEZONE>
+    volumes:
+      - /path/mediastack/config/prowlarr:/config
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    restart: unless-stopped
+  overseerr:
+    container_name: overseerr
+    image: lscr.io/linuxserver/overseerr:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=<TIMEZONE>
+    ports:
+      - 5055:5055 #overseerr default port
+    volumes:
+      - /path/mediastack/config/overseerr:/config
+    restart: unless-stopped
+    networks:
+      - tunnel
+  cloudflared:
+    container_name: cloudflared #tunnel is needed to access overseerr from outside
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=<TIMEZONE>
+    command: tunnel --no-autoupdate run --token <token>
+    networks:
+      - tunnel
+networks:
+  tunnel:
+    driver: bridge
+    
+  
